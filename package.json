@@ -1,0 +1,11 @@
+{
+  "name": "zeneith",
+  "private": true,
+  "workspaces": ["zeneith-frontend", "zeneith-frontend/mobile", "zeneith-backend"],
+  "scripts": {
+    "dev:frontend": "yarn workspace frontend dev",
+    "dev:backend": "yarn workspace backend dev",
+    "build:contracts": "cd zeneith-contracts/soroban && cargo build --target wasm32-unknown-unknown --release",
+    "build:circuits": "cd zeneith-contracts/circuits && nargo build"
+  }
+}
