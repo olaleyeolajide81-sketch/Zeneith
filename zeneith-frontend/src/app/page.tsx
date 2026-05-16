@@ -2,28 +2,58 @@
 
 import { useState } from "react";
 import { useProver } from "@/hooks/useProver";
+import { submitPayrollProof } from "@/lib/stellar";
+import { Keypair } from "@stellar/stellar-sdk";
 
 export default function PayrollPage() {
   const { generatePayrollProof, proving, error } = useProver();
   const [salariesInput, setSalariesInput] = useState("1000,2000,3000");
-  const [result, setResult] = useState<string | null>(null);
+  const [secretKey, setSecretKey] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setStatus(null);
+    setTxHash(null);
+
     const salaries = salariesInput.split(",").map(Number);
     const totalAmount = salaries.reduce((a, b) => a + b, 0);
     const blindingFactors = salaries.map((_, i) => `0x0${i + 1}`);
 
-    const proof = await generatePayrollProof({
+    setStatus("Generating ZK proof in browser…");
+    const proofResult = await generatePayrollProof({
       salaries,
       blindingFactors,
       activeCount: salaries.length,
       totalAmount,
     });
 
-    if (proof) {
-      setResult(`Proof generated. Commitment: ${proof.commitment}`);
-      // TODO: call submitPayrollProof(keypair, proof.proof, proof.commitment, BigInt(totalAmount), salaries.length)
+    if (!proofResult) return;
+
+    setStatus("Submitting proof to Soroban…");
+    try {
+      let keypair: Keypair;
+      try {
+        keypair = Keypair.fromSecret(secretKey.trim());
+      } catch {
+        setStatus("Error: invalid secret key (S...)");
+        return;
+      }
+
+      const result = await submitPayrollProof(
+        keypair,
+        proofResult.proof,
+        proofResult.commitment,
+        BigInt(totalAmount),
+        salaries.length,
+        proofResult.publicInputs,
+      );
+
+      setTxHash(result.hash);
+      setStatus(`✓ Proof submitted on-chain. Commitment: ${proofResult.commitment.slice(0, 18)}…`);
+    } catch (err: any) {
+      setStatus(`Submission error: ${err.message}`);
     }
   }
 
@@ -34,7 +64,7 @@ export default function PayrollPage() {
 
       <form onSubmit={handleSubmit}>
         <label>
-          Salaries (comma-separated, in XLM stroops)
+          Salaries (comma-separated, in stroops)
           <br />
           <input
             value={salariesInput}
@@ -43,13 +73,37 @@ export default function PayrollPage() {
           />
         </label>
         <br /><br />
-        <button type="submit" disabled={proving}>
+        <label>
+          Employer Secret Key (S…)
+          <br />
+          <input
+            type="password"
+            value={secretKey}
+            onChange={(e) => setSecretKey(e.target.value)}
+            placeholder="SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+            style={{ width: "100%", padding: 8, marginTop: 4 }}
+          />
+        </label>
+        <br /><br />
+        <button type="submit" disabled={proving || !secretKey}>
           {proving ? "Generating proof…" : "Generate & Submit Proof"}
         </button>
       </form>
 
-      {error && <p style={{ color: "red" }}>Error: {error}</p>}
-      {result && <p style={{ color: "green" }}>{result}</p>}
+      {error && <p style={{ color: "red" }}>Prover error: {error}</p>}
+      {status && <p style={{ color: status.startsWith("✓") ? "green" : "#555" }}>{status}</p>}
+      {txHash && (
+        <p>
+          Transaction:{" "}
+          <a
+            href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {txHash.slice(0, 16)}…
+          </a>
+        </p>
+      )}
 
       <hr />
       <section>

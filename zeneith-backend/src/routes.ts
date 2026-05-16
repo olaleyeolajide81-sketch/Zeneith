@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { getPayrollEvents, getTaxEvents } from "./indexer";
-import { rpc as StellarRpc } from "@stellar/stellar-sdk";
+import { rpc as StellarRpc, xdr, Address } from "@stellar/stellar-sdk";
 
 const router = Router();
+const CONTRACT_ID = process.env.CONTRACT_ID ?? "";
 const server = new StellarRpc.Server(
   process.env.STELLAR_RPC_URL ?? "https://soroban-testnet.stellar.org"
 );
@@ -33,9 +34,39 @@ router.get("/dashboard", (_req, res) => {
 router.get("/viewing-key/:employer", async (req, res) => {
   try {
     const { employer } = req.params;
-    // Fetch from contract storage via RPC getLedgerEntries
-    // Simplified: return placeholder until contract is deployed
-    res.json({ employer, encryptedKey: null, message: "Key lookup requires deployed contract" });
+    if (!CONTRACT_ID) {
+      return res.status(503).json({ error: "CONTRACT_ID not configured" });
+    }
+
+    const contractAddress = new Address(CONTRACT_ID);
+    const employerAddress = new Address(employer);
+
+    // Encode the storage key: DataKey::ViewingKey(employer)
+    const key = xdr.ScVal.scvVec([
+      xdr.ScVal.scvSymbol("ViewingKey"),
+      employerAddress.toScVal(),
+    ]);
+
+    const ledgerKey = xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: contractAddress.toScAddress(),
+        key,
+        durability: xdr.ContractDataDurability.persistent(),
+      })
+    );
+
+    const result = await server.getLedgerEntries(ledgerKey);
+    if (!result.entries || result.entries.length === 0) {
+      return res.json({ employer, encryptedKey: null });
+    }
+
+    const entry = result.entries[0].val
+      .contractData()
+      .val()
+      .bytes()
+      ?.toString("base64");
+
+    res.json({ employer, encryptedKey: entry ?? null });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
