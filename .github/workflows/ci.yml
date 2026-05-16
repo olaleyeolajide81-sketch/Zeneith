@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contract:
+    name: Soroban Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            zeneith-contracts/soroban/target
+          key: cargo-${{ hashFiles('zeneith-contracts/soroban/Cargo.toml') }}
+
+      - name: Build contract (wasm)
+        working-directory: zeneith-contracts/soroban
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run contract tests
+        working-directory: zeneith-contracts/soroban
+        run: cargo test
+
+  circuit:
+    name: Noir Circuit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nargo
+        run: |
+          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          echo "$HOME/.nargo/bin" >> $GITHUB_PATH
+          $HOME/.nargo/bin/noirup --version 0.36.0
+
+      - name: Build circuit
+        working-directory: zeneith-contracts/circuits
+        run: nargo build
+
+      - name: Check constraints
+        working-directory: zeneith-contracts/circuits
+        run: nargo check
+
+      - name: Execute witness
+        working-directory: zeneith-contracts/circuits
+        run: nargo execute
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: zeneith-frontend
+        run: yarn install
+
+      - name: Type check
+        working-directory: zeneith-frontend
+        run: yarn tsc --noEmit
+
+      - name: Build
+        working-directory: zeneith-frontend
+        run: yarn build
+        env:
+          NEXT_PUBLIC_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM
+          NEXT_PUBLIC_STELLAR_NETWORK: testnet
+          NEXT_PUBLIC_STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: zeneith-backend
+        run: yarn install
+
+      - name: Type check & build
+        working-directory: zeneith-backend
+        run: yarn build
